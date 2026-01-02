@@ -1,0 +1,234 @@
+= Component Structure (Option B) for Reuse by Engines in Another System
+:toc:
+:toclevels: 3
+:sectnums:
+
+== Goal
+
+Design an IDesign-style component so it can be used from the *Engine layer of another system* using **Option B** (dedicated Contracts project).
+
+Key outcomes:
+
+* The consuming system references only stable assemblies (Contracts + Managers/Engines).
+* The component’s infrastructure details (ResourceAccess) are not referenced by the consumer.
+* DIP is enforced physically: all dependencies go through Contracts.
+
+---
+
+== Option B: Recommended Projects
+
+Option B introduces a dedicated `Contracts` project that owns the component’s stable surface area:
+
+* Interfaces needed by the component (accessors, gateways)
+* Domain models (if shared with consumers)
+* Domain exceptions (if shared with consumers)
+* Optional result types
+
+This makes the component reusable with minimal coupling.
+
+---
+
+== Project Structure (text)
+
+----
+MyComponent.sln
+|
+├─ MyComponent.Contracts                      (public; referenced by consumers)
+|  ├─ Contracts/
+|  |  ├─ I<MyResource>Accessor.cs             (integration abstractions)
+|  |  ├─ I<MyComponentFacade>.cs              (optional facade interface)
+|  |  └─ (Optional ports for outbound calls)
+|  |
+|  ├─ Domain/
+|  |  ├─ Models/
+|  |  |  ├─ Entity.cs
+|  |  |  ├─ ValueObject.cs
+|  |  |  └─ EntityId.cs
+|  |  └─ Exceptions/
+|  |     ├─ BusinessRuleViolationException.cs
+|  |     └─ ValidationException.cs
+|  |
+|  └─ Primitives/                             (optional)
+|     ├─ Result.cs
+|     └─ ErrorCodes.cs
+|
+├─ MyComponent.Managers                       (public; depends on Contracts)
+|  ├─ <UseCase>Manager.cs
+|  └─ Exceptions/
+|     └─ UseCasePreconditionException.cs      (use-case meaning, not domain-wide)
+|
+├─ MyComponent.Engines                        (public; depends on Contracts)
+|  ├─ <Rule>Engine.cs
+|  └─ (No domain models here if they are shared; otherwise module-specific models can be here)
+|
+├─ MyComponent.ResourceAccess                 (implementation; depends on Contracts)
+|  ├─ Http/ or Sql/ or FileSystem/
+|  |  ├─ <Tech><MyResource>Accessor.cs        (implements I<MyResource>Accessor)
+|  |  └─ Dtos/
+|  |     ├─ VendorDto.cs                      (vendor payload)
+|  |     └─ DbRecord.cs                       (persistence record)
+|  ├─ Mapping/
+|  |  └─ DomainMapping.cs                     (Contracts.Domain ↔ integration DTOs)
+|  └─ Exceptions/
+|     ├─ ResourceTimeoutException.cs
+|     └─ ResourceUnavailableException.cs
+|
+└─ MyComponent.Utilities                      (optional shared helpers)
+   ├─ RetryPolicy.cs
+   ├─ Clock.cs
+   └─ HashUtility.cs
+----
+
+---
+
+== What the Consumer System References (Critical)
+
+The other system (its Engines project) references ONLY:
+
+* `MyComponent.Contracts`
+* Optionally: `MyComponent.Managers` (if calling a Manager facade)
+* Optionally: `MyComponent.Engines` (if calling Engines directly)
+* Optionally: `MyComponent.Utilities`
+
+The consumer should NOT reference:
+
+* `MyComponent.ResourceAccess`
+
+This enforces DIP: consumer depends on stable abstractions, not volatile implementations.
+
+---
+
+== Recommended Public Entry Point for Consumers
+
+When another system uses your component, prefer exposing a single *facade-style API*.
+
+=== Preferred: Component Facade as a Manager (Use Case API)
+
+*Consumer Engine calls the component through a Manager (the component’s use-case boundary).*
+
+[source,text]
+----
+OtherSystem.Engines  -->  MyComponent.Managers.<UseCase>Manager
+                      -->  uses MyComponent.Contracts.Domain models
+----
+
+Optionally, define an interface for the facade in Contracts:
+
+[source,csharp]
+----
+public interface IMyComponentFacade
+{
+    Task<Result> ExecuteAsync(Input input, CancellationToken ct);
+}
+----
+
+Implementation is in `MyComponent.Managers`.
+
+---
+
+== How Integrations Are Provided (Accessor Implementations)
+
+Because the consumer does not reference `MyComponent.ResourceAccess`,
+it must provide implementations of the accessor interfaces defined in:
+
+`MyComponent.Contracts.Contracts`
+
+=== Example Accessor Interface (in Contracts)
+
+[source,csharp]
+----
+public interface IInventoryAccessor
+{
+    Task<int> GetAvailableAsync(ProductId id, CancellationToken ct);
+}
+----
+
+=== Consumer Implementation (in the other system)
+
+[source,csharp]
+----
+public sealed class OtherSystemInventoryAccessor : IInventoryAccessor
+{
+    public Task<int> GetAvailableAsync(ProductId id, CancellationToken ct)
+    {
+        // Call DB / API / filesystem of the other system
+    }
+}
+----
+
+=== Consumer DI Wiring
+
+[source,csharp]
+----
+services.AddScoped<IInventoryAccessor, OtherSystemInventoryAccessor>();
+
+// If consumer calls component Manager facade:
+services.AddScoped<IMyComponentFacade, MyComponentFacadeManager>();
+// or if facade is concrete:
+services.AddScoped<MyComponentFacadeManager>();
+----
+
+---
+
+== Exceptions / Models / DTOs Placement (Option B)
+
+=== Models (shared vocabulary)
+Put shared domain models in:
+
+* `MyComponent.Contracts.Domain.Models`
+
+The consumer engine can use them without referencing implementations.
+
+=== Business Exceptions (shared meaning)
+Put business exceptions in:
+
+* `MyComponent.Contracts.Domain.Exceptions`
+
+These are meaningful to consumers (rule violations, validation errors).
+
+=== Use-case Exceptions (component workflow meaning)
+Put use-case exceptions in:
+
+* `MyComponent.Managers.Exceptions`
+
+These are meaningful when calling the facade, but not part of the domain vocabulary.
+
+=== DTOs
+Keep DTOs strictly at boundaries:
+
+* Vendor/DB DTOs: `MyComponent.ResourceAccess.*.Dtos` (not referenced by consumer)
+* API DTOs: belong to the host/service boundary of whichever system exposes endpoints (often the consuming system)
+
+---
+
+== Two Reuse Modes (Pick One)
+
+=== Mode 1: Consumer calls the component facade (recommended)
+* Most stable.
+* Consumer sees a small API.
+* Component keeps internal orchestration rules.
+
+[source,text]
+----
+Consumer Engine -> IMyComponentFacade (Manager) -> Engines -> Accessors
+----
+
+=== Mode 2: Consumer calls component Engines directly (only for pure rule libraries)
+Use only if:
+* there is no orchestration
+* Engines are deterministic and mostly pure
+
+Otherwise it couples consumer to internal structure.
+
+---
+
+== Summary
+
+With Option B, to reuse a component from another system’s Engine layer:
+
+* Put stable abstractions + shared domain in `MyComponent.Contracts`.
+* Keep `ResourceAccess` as an implementation detail.
+* Expose a small facade (usually a Manager) from `MyComponent.Managers`.
+* Let the consuming system implement the component’s accessor interfaces and wire DI.
+
+This is the cleanest, most enforceable DIP-friendly structure.
