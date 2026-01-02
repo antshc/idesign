@@ -1,0 +1,261 @@
+= IDesign Roles Explained: Manager, Engine, ResourceAccess, Utility, Service
+:toc:
+:toclevels: 2
+:sectnums:
+
+This document explains the core architectural roles used in the *IDesign / Righting Software* methodology.
+The roles are defined by *responsibility, volatility, and interaction rules* — not by technology or framework.
+
+== Big Picture
+
+IDesign decomposes systems by *volatility*, not by technical function.
+
+Top-down volatility decreases, reuse increases.
+
+----
+Client
+  ↓
+Manager        ← coordinates use cases (most volatile)
+  ↓
+Engine         ← business rules & algorithms
+  ↓
+ResourceAccess ← technical integration
+  ↓
+Resource       ← DB, FS, REST, Queue (least volatile)
+
+Utilities are callable by all layers.
+----
+
+== Manager
+
+=== Definition
+A *Manager* coordinates a **single use case**.
+
+It answers:
+____
+What needs to happen, and in what order, for this use case?
+____
+
+=== Responsibilities
+* Orchestrates a single use case
+* Coordinates Engines
+* Handles workflow, sequencing, and decisions
+* Owns application flow (not business rules)
+* Can queue calls to other Managers
+
+=== Must NOT
+* Contain business logic
+* Implement algorithms
+* Access databases directly
+* Contain infrastructure or technical logic
+
+=== Volatility
+*Highest volatility*  
+Changes when **use cases change**
+
+=== Example
+[source,csharp]
+----
+OrderManager.PlaceOrder()
+{
+    ValidateOrderEngine.Validate(order);
+    PricingEngine.Calculate(order);
+    InventoryEngine.Reserve(order);
+    PaymentManager.QueueCharge(order);
+}
+----
+
+=== Cardinality Rules
+* Few Managers per system
+* Typically one Manager per major use case
+
+== Engine
+
+=== Definition
+An *Engine* encapsulates **business rules and algorithms**.
+
+It answers:
+____
+How does this business rule work?
+____
+
+=== Responsibilities
+* Encapsulates pure business logic
+* Stateless or minimally stateful
+* Reusable across multiple Managers
+* Deterministic and testable
+
+=== Must NOT
+* Coordinate workflows
+* Queue calls
+* Publish events
+* Act as an orchestrator
+
+=== Volatility
+*Medium volatility*  
+Changes when **business rules change**
+
+=== Example
+[source,csharp]
+----
+PricingEngine.CalculateDiscount(order)
+InventoryEngine.CanReserve(items)
+TaxEngine.ComputeTax(order)
+----
+
+=== Design Goal
+High reuse, low coordination
+
+== ResourceAccess (Accessor)
+
+=== Definition
+A *ResourceAccess* component isolates **technical access to resources**.
+
+It answers:
+____
+How do I talk to the database, file system, REST API, or queue?
+____
+
+=== Responsibilities
+* Translate domain requests into technical calls
+* Handle serialization, retries, mapping
+* Isolate storage / transport technology
+
+=== Must NOT
+* Contain business logic
+* Coordinate workflows
+* Publish or subscribe to events
+* Call other ResourceAccess components (guideline)
+
+=== Volatility
+*Low volatility*  
+Changes when **technology changes**
+
+=== Example
+[source,csharp]
+----
+OrderResourceAccess.Save(order)
+CustomerResourceAccess.Load(customerId)
+BlobStorageAccess.Read(blobId)
+----
+
+=== Key Rule
+Managers and Engines may call ResourceAccess.  
+ResourceAccess never calls up.
+
+== Utility
+
+=== Definition
+A *Utility* is a **stateless, cross-cutting helper**.
+
+It answers:
+____
+Is this useful everywhere and owned by no use case?
+____
+
+=== Responsibilities
+* Stateless helper logic
+* Technical or mathematical helpers
+* Formatting, parsing, hashing, retry logic
+
+=== Must NOT
+* Know business concepts
+* Coordinate workflows
+* Hold state related to use cases
+
+=== Volatility
+*Very low volatility*
+
+=== Example
+[source,csharp]
+----
+Clock.UtcNow()
+RetryPolicy.ExecuteAsync(...)
+HashUtility.ComputeSha256(...)
+JsonSerializerHelper.Serialize(...)
+----
+
+=== Interaction Rule
+All components may call Utilities.
+
+== Service
+
+=== Definition
+A *Service* is a **deployment and boundary concept**, not a logic role.
+
+It answers:
+____
+What is exposed to the outside world?
+____
+
+A Service hosts Managers and exposes contracts.
+
+=== Responsibilities
+* Endpoint definition (HTTP, gRPC, messaging)
+* Authentication and authorization boundaries
+* Contract versioning
+* Mapping transport calls to Managers
+
+=== Must NOT
+* Contain business logic
+* Replace Managers or Engines
+* Become a god-layer
+
+=== Example
+[source,text]
+----
+OrderService
+ ├── Controllers → OrderManager
+ ├── Contracts
+ └── Hosting & Security
+----
+
+=== Important
+A Service is *not a layer*.  
+It *contains* layers.
+
+== Summary Table
+
+[cols="1,3,1,1,1",options="header"]
+|===
+| Role | Purpose | Volatility | Business Logic | Coordinates
+
+| Manager
+| Use case orchestration
+| High
+| No
+| Yes
+
+| Engine
+| Business rules & algorithms
+| Medium
+| Yes
+| No
+
+| ResourceAccess
+| Technical integration
+| Low
+| No
+| No
+
+| Utility
+| Cross-cutting helpers
+| Very Low
+| No
+| No
+
+| Service
+| Deployment & contract boundary
+| N/A
+| No
+| No
+|===
+
+== One-Sentence Rule of Thumb
+
+* *Manager* → What happens?
+* *Engine* → How does the business rule work?
+* *ResourceAccess* → How do I talk to the technology?
+* *Utility* → Helpful everywhere, owned nowhere
+* *Service* → Where the system is exposed
+
