@@ -1,0 +1,378 @@
+= IDesign Project Structure Summary (Extended: Exceptions, Models, DTOs, and Modular Monolith Option)
+:toc:
+:toclevels: 3
+:sectnums:
+
+Goal: keep a *closed architecture* and apply DIP so that:
+* High-level policy (Managers/Engines) depends on abstractions and stable models
+* Low-level details (ResourceAccess) depend on those abstractions and models
+* Service boundary owns transport DTOs and mapping
+* In a modular monolith, modules remain isolated and composable
+
+---
+
+== Key Placement Rules (Exceptions / Models / DTOs)
+
+=== Exceptions (Rule of origin)
+Place exceptions in the layer that *owns the meaning* of the error.
+
+* *Business / domain exceptions* (validation, rule violations) → **Engines**
+* *Use-case / workflow exceptions* (preconditions for a use case) → **Managers**
+* *Infrastructure exceptions* (timeouts, connectivity, serialization) → **ResourceAccess**
+* *Transport/API exceptions* (400/404 mapping, gRPC status mapping) → **Service**
+
+Guideline:
+*Do not leak infrastructure exceptions upward.* Convert them to a stable exception or result type at the boundary between layers.
+
+---
+
+=== Models (Domain Models)
+Models that represent business concepts (Order, Product, Customer, Money, ProductId) belong to the **Engine layer** (or a shared domain/contracts project),
+because Engines implement business logic and should own the vocabulary.
+
+* Domain Model → **Engines (Domain)**
+* Value Objects → **Engines (Domain)**
+* Enums that represent business meaning → **Engines (Domain)**
+
+Managers use these models but should not own them.
+
+---
+
+=== DTOs (Data Transfer Objects)
+DTOs represent *boundary shapes*.
+
+There are typically 3 DTO categories; keep them separate:
+
+1. *Service/API DTOs* (HTTP request/response, gRPC messages)
+   * Owned by **Service** (because they are transport contract shapes)
+
+2. *Integration DTOs* (vendor API payloads, storage SDK shapes)
+   * Owned by **ResourceAccess** (because they are implementation details)
+
+3. *Internal contracts* (optional)
+   * If you use internal messages/events: keep them in **Contracts** (Option B) or in Managers/Service depending on ownership.
+
+Mapping rules:
+* Service DTOs ↔ Domain Models mapping happens in **Service** (or a thin adapter inside Service).
+* Integration DTOs ↔ Domain Models mapping happens in **ResourceAccess**.
+
+---
+
+== Option A — Interfaces + Domain in Engines (Most Common)
+
+This option is preferred when:
+* Accessors represent **business data needs**
+* Engines are the primary consumers
+* The system is medium-sized
+* You want minimal project count
+
+=== Project Structure (extended)
+
+----
+MySystem.sln
+|
+├─ MySystem.Managers
+|   ├─ OrderManager.cs
+|   ├─ PaymentManager.cs
+|   ├─ Exceptions
+|   |   ├─ UseCasePreconditionException.cs
+|   |   └─ WorkflowConflictException.cs
+|   └─ (No DTOs here)
+|
+├─ MySystem.Engines
+|   ├─ PricingEngine.cs
+|   ├─ InventoryEngine.cs
+|   ├─ Domain
+|   |   ├─ Models
+|   |   |   ├─ Order.cs
+|   |   |   ├─ Product.cs
+|   |   |   ├─ Money.cs
+|   |   |   └─ ProductId.cs
+|   |   ├─ Exceptions
+|   |   |   ├─ BusinessRuleViolationException.cs
+|   |   |   ├─ InvalidOrderException.cs
+|   |   |   └─ OutOfStockException.cs
+|   |   └─ (ValueObjects, Enums)
+|   └─ Contracts
+|       ├─ IOrderAccessor.cs
+|       ├─ IInventoryAccessor.cs
+|       └─ IPaymentGateway.cs
+|
+├─ MySystem.ResourceAccess
+|   ├─ Sql
+|   |   ├─ SqlOrderAccessor.cs
+|   |   └─ SqlOrderRecord.cs          (DB DTO / persistence model)
+|   ├─ Http
+|   |   ├─ HttpInventoryAccessor.cs
+|   |   └─ VendorInventoryDto.cs      (vendor DTO)
+|   ├─ Mapping
+|   |   ├─ OrderMapping.cs            (Domain ↔ DB DTO)
+|   |   └─ InventoryMapping.cs        (Domain ↔ Vendor DTO)
+|   └─ Exceptions
+|       ├─ ResourceTimeoutException.cs
+|       ├─ ResourceUnavailableException.cs
+|       └─ DataFormatException.cs
+|
+├─ MySystem.Utilities
+|   ├─ RetryPolicy.cs
+|   ├─ Clock.cs
+|   └─ HashUtility.cs
+|
+└─ MySystem.Service
+    ├─ Controllers
+    |   └─ OrderController.cs
+    ├─ Dtos
+    |   ├─ Requests
+    |   |   └─ PlaceOrderRequestDto.cs
+    |   └─ Responses
+    |       └─ PlaceOrderResponseDto.cs
+    ├─ Mapping
+    |   └─ ApiMapping.cs              (Service DTO ↔ Domain)
+    ├─ ExceptionHandling
+    |   └─ ApiExceptionMapper.cs      (Domain/UseCase exceptions → HTTP codes)
+    └─ DependencyInjection.cs         (composition root)
+----
+
+---
+
+== Option B — Dedicated Contracts Project (Large / Multi-Subsystem)
+
+This option is preferred when:
+* Many Managers and Engines depend on the same Accessors
+* Multiple subsystems share contracts
+* You want strict physical enforcement of DIP
+* The system is large or long-lived
+
+=== Project Structure (extended)
+
+----
+MySystem.sln
+|
+├─ MySystem.Contracts
+|   ├─ Contracts
+|   |   ├─ IOrderAccessor.cs
+|   |   ├─ IInventoryAccessor.cs
+|   |   └─ IPaymentGateway.cs
+|   ├─ Domain
+|   |   ├─ Models
+|   |   |   ├─ Order.cs
+|   |   |   ├─ Product.cs
+|   |   |   ├─ Money.cs
+|   |   |   └─ ProductId.cs
+|   |   ├─ Exceptions
+|   |   |   ├─ BusinessRuleViolationException.cs
+|   |   |   └─ OutOfStockException.cs
+|   |   └─ (ValueObjects, Enums)
+|
+├─ MySystem.Managers
+|   ├─ OrderManager.cs
+|   ├─ Exceptions
+|   |   ├─ UseCasePreconditionException.cs
+|   |   └─ WorkflowConflictException.cs
+|
+├─ MySystem.Engines
+|   ├─ PricingEngine.cs
+|   └─ InventoryEngine.cs
+|
+├─ MySystem.ResourceAccess
+|   ├─ Sql
+|   |   ├─ SqlOrderAccessor.cs
+|   |   └─ SqlOrderRecord.cs            (DB DTO)
+|   ├─ Http
+|   |   ├─ HttpInventoryAccessor.cs
+|   |   └─ VendorInventoryDto.cs        (vendor DTO)
+|   ├─ Mapping
+|   |   ├─ OrderMapping.cs              (Domain ↔ DB DTO)
+|   |   └─ InventoryMapping.cs          (Domain ↔ Vendor DTO)
+|   └─ Exceptions
+|       ├─ ResourceTimeoutException.cs
+|       └─ ResourceUnavailableException.cs
+|
+├─ MySystem.Utilities
+|   ├─ RetryPolicy.cs
+|   └─ Clock.cs
+|
+└─ MySystem.Service
+    ├─ Controllers
+    ├─ Dtos
+    ├─ Mapping
+    ├─ ExceptionHandling
+    └─ DependencyInjection.cs
+----
+
+---
+
+== Option C — Modular Monolith (Modules as Subsystems)
+
+This option is preferred when:
+* The system is a **single deployable** (monolith)
+* You want **strict module boundaries**
+* You want most benefits of microservices (isolation, composability) without distributed complexity
+* Each module can evolve independently and may be extracted later
+
+=== Core Ideas
+
+* Each module is a *subsystem* with its own internal layers:
+  * Managers, Engines, ResourceAccess, Utilities (module-local)
+* Modules communicate via:
+  * Interfaces in a shared Contracts layer (compile-time)
+  * Or asynchronous messages/events (runtime)
+* The application entrypoint (Host) is the composition root.
+
+=== Recommended Dependency Rules (Module Isolation)
+
+* Code inside a module can reference only:
+  * Its own module projects
+  * Shared Contracts (if used)
+  * Shared Infrastructure (carefully, ideally via abstractions)
+* No module references another module’s ResourceAccess directly.
+* Prefer *queued calls between Managers* across modules (conceptually),
+  implemented as internal message bus, mediator, or domain events.
+
+=== Option C1 — Per-Module Contracts + Per-Module Domain (Strong Isolation)
+
+Use when modules are independent and domain types are not shared.
+
+==== Project Structure (text)
+
+----
+MySystem.sln
+|
+├─ src
+|  |
+|  ├─ Host
+|  |   ├─ MySystem.Host               (composition root, configuration, DI)
+|  |   └─ MySystem.Api                (HTTP endpoints + API DTOs)
+|  |
+|  ├─ Modules
+|  |   |
+|  |   ├─ Orders
+|  |   |   ├─ Orders.Managers
+|  |   |   |   ├─ OrderManager.cs
+|  |   |   |   └─ Exceptions/...
+|  |   |   ├─ Orders.Engines
+|  |   |   |   ├─ Domain/Models/Order.cs
+|  |   |   |   ├─ Domain/Exceptions/...
+|  |   |   |   └─ Contracts/IOrderAccessor.cs
+|  |   |   ├─ Orders.ResourceAccess
+|  |   |   |   ├─ Sql/SqlOrderAccessor.cs
+|  |   |   |   ├─ Sql/SqlOrderRecord.cs           (DB DTO)
+|  |   |   |   ├─ Mapping/OrderMapping.cs
+|  |   |   |   └─ Exceptions/...
+|  |   |   └─ Orders.Utilities
+|  |   |
+|  |   ├─ Catalog
+|  |   |   ├─ Catalog.Managers
+|  |   |   ├─ Catalog.Engines
+|  |   |   ├─ Catalog.ResourceAccess
+|  |   |   └─ Catalog.Utilities
+|  |   |
+|  |   └─ Payments
+|  |       ├─ Payments.Managers
+|  |       ├─ Payments.Engines
+|  |       ├─ Payments.ResourceAccess
+|  |       └─ Payments.Utilities
+|  |
+|  └─ Shared
+|      ├─ Shared.Utilities            (optional shared helpers)
+|      └─ Shared.Messaging            (internal bus / eventing)
+----
+
+==== How DTOs Work in Modular Monolith
+
+* API DTOs live in Host/API project:
+  * `MySystem.Api/Dtos/...`
+* Mapping from API DTOs to module domain models happens in:
+  * API project (thin mapping) OR
+  * module-specific facade/adapters exposed by module Managers
+
+Module integration DTOs (vendor/DB) remain inside the module ResourceAccess project.
+
+---
+
+=== Option C2 — Shared Contracts + Shared Domain (When Domain Must Be Shared)
+
+Use when you have truly shared domain types (rare, but sometimes needed).
+
+==== Project Structure (text)
+
+----
+MySystem.sln
+|
+├─ MySystem.Contracts
+|   ├─ SharedDomain/Models/...
+|   ├─ SharedDomain/Exceptions/...
+|   └─ SharedContracts/Interfaces/...
+|
+├─ Host
+|   ├─ MySystem.Host
+|   └─ MySystem.Api
+|
+└─ Modules
+    ├─ Orders
+    |   ├─ Orders.Managers
+    |   ├─ Orders.Engines
+    |   └─ Orders.ResourceAccess
+    ├─ Catalog
+    └─ Payments
+----
+
+==== Warning (C2)
+Shared domain tends to couple modules. Use only when:
+* the shared model is stable
+* ownership is clear
+* volatility is low
+
+Prefer C1 if possible.
+
+---
+
+== Composition Root in Modular Monolith
+
+In Option C, the composition root is the Host:
+
+* Registers module Managers, Engines, ResourceAccess implementations
+* Wires module interfaces to module implementations
+* Configures internal messaging/eventing for cross-module calls
+
+Example:
+
+[source,csharp]
+----
+services.AddOrdersModule();
+services.AddCatalogModule();
+services.AddPaymentsModule();
+----
+
+Each module exposes a single registration entry point.
+
+---
+
+== Quick Decision Guide
+
+[cols="1,3",options="header"]
+|===
+| Situation | Recommendation
+
+| Medium system, single domain
+| Option A
+
+| Large system, shared accessors/contracts
+| Option B
+
+| Single deployable, want strong boundaries + future extraction
+| Option C (Modular Monolith)
+
+| Modular monolith with minimal sharing
+| Option C1 (preferred)
+
+| Modular monolith with unavoidable shared domain
+| Option C2 (use carefully)
+|===
+
+---
+
+== One-Sentence Summary
+
+*Option A/B focus on layering within a system; Option C repeats those layers per module, enforcing boundaries inside a single deployable, with Host as the composition root.*
+
