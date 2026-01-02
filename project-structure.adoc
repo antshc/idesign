@@ -72,66 +72,156 @@ This option is preferred when:
 MySystem.sln
 |
 ├─ MySystem.Managers
+|   # Use-case orchestration (entry points)
+|   # May queue calls to other Managers
+|   # May publish events (typically after successful use-case completion)
+|   |
 |   ├─ OrderManager.cs
 |   ├─ PaymentManager.cs
-|   ├─ Exceptions
+|   ├─ Exceptions/
 |   |   ├─ UseCasePreconditionException.cs
 |   |   └─ WorkflowConflictException.cs
-|   └─ (No DTOs here)
+|   |
+|   └─ Events/
+|       # Outgoing events published by Managers (business-level integration events)
+|       # Define event contracts here if they are owned by the system (not transport DTOs)
+|       ├─ OrderPlacedEvent.cs
+|       └─ PaymentCapturedEvent.cs
 |
 ├─ MySystem.Engines
+|   # Business rules + domain vocabulary
+|   # No orchestration, no queuing, no publishing
+|   |
 |   ├─ PricingEngine.cs
 |   ├─ InventoryEngine.cs
-|   ├─ Domain
-|   |   ├─ Models
+|   |
+|   ├─ Domain/
+|   |   ├─ Models/
 |   |   |   ├─ Order.cs
 |   |   |   ├─ Product.cs
 |   |   |   ├─ Money.cs
 |   |   |   └─ ProductId.cs
-|   |   ├─ Exceptions
-|   |   |   ├─ BusinessRuleViolationException.cs
-|   |   |   ├─ InvalidOrderException.cs
-|   |   |   └─ OutOfStockException.cs
-|   |   └─ (ValueObjects, Enums)
-|   └─ Contracts
+|   |   └─ Exceptions/
+|   |       ├─ BusinessRuleViolationException.cs
+|   |       ├─ InvalidOrderException.cs
+|   |       └─ OutOfStockException.cs
+|   |
+|   └─ Contracts/
+|       # Abstractions needed by policy (DIP)
+|       # Implemented by ResourceAccess
 |       ├─ IOrderAccessor.cs
 |       ├─ IInventoryAccessor.cs
-|       └─ IPaymentGateway.cs
+|       ├─ IPaymentGateway.cs
+|       ├─ IEventPublisher.cs           # publish integration events (implemented in ResourceAccess or Infrastructure)
+|       └─ IEventSubscriber.cs          # optional: subscription boundary used by Service/Host only
 |
 ├─ MySystem.ResourceAccess
-|   ├─ Sql
+|   # Technical integration only (DB/HTTP/Queue/EventBus/FileSystem)
+|   # Implements Engine.Contracts
+|   # No business decisions, no orchestration
+|   |
+|   ├─ Sql/
 |   |   ├─ SqlOrderAccessor.cs
-|   |   └─ SqlOrderRecord.cs          (DB DTO / persistence model)
-|   ├─ Http
+|   |   └─ SqlOrderRecord.cs            # DB DTO / persistence record
+|   |
+|   ├─ Http/
 |   |   ├─ HttpInventoryAccessor.cs
-|   |   └─ VendorInventoryDto.cs      (vendor DTO)
-|   ├─ Mapping
-|   |   ├─ OrderMapping.cs            (Domain ↔ DB DTO)
-|   |   └─ InventoryMapping.cs        (Domain ↔ Vendor DTO)
-|   └─ Exceptions
+|   |   └─ VendorInventoryDto.cs        # vendor DTO
+|   |
+|   ├─ Messaging/
+|   |   # Event bus integration (Kafka/RabbitMQ/ServiceBus/etc.)
+|   |   ├─ EventBusPublisher.cs         # implements IEventPublisher
+|   |   ├─ EventBusConsumer.cs          # receives external events and forwards to Service/Host
+|   |   └─ EventEnvelopeDto.cs          # wire format DTO (transport-level)
+|   |
+|   ├─ Mapping/
+|   |   ├─ OrderMapping.cs              # Domain ↔ DB DTO
+|   |   ├─ InventoryMapping.cs          # Domain ↔ Vendor DTO
+|   |   └─ EventMapping.cs              # Manager Events ↔ transport envelope DTO
+|   |
+|   └─ Exceptions/
 |       ├─ ResourceTimeoutException.cs
 |       ├─ ResourceUnavailableException.cs
 |       └─ DataFormatException.cs
 |
 ├─ MySystem.Utilities
+|   # Cross-cutting helpers callable by all layers
 |   ├─ RetryPolicy.cs
 |   ├─ Clock.cs
 |   └─ HashUtility.cs
 |
 └─ MySystem.Service
-    ├─ Controllers
-    |   └─ OrderController.cs
-    ├─ Dtos
-    |   ├─ Requests
-    |   |   └─ PlaceOrderRequestDto.cs
-    |   └─ Responses
-    |       └─ PlaceOrderResponseDto.cs
-    ├─ Mapping
-    |   └─ ApiMapping.cs              (Service DTO ↔ Domain)
-    ├─ ExceptionHandling
-    |   └─ ApiExceptionMapper.cs      (Domain/UseCase exceptions → HTTP codes)
-    └─ DependencyInjection.cs         (composition root)
+    # Composition root + transport boundary (HTTP/gRPC/Worker)
+    # Wires DI and maps transport to Managers
+    # Hosts event handlers that delegate to Managers (subscription adapters)
+    |
+    ├─ Api/
+    |   ├─ Controllers/
+    |   |   └─ OrderController.cs
+    |   └─ Dtos/
+    |       ├─ Requests/
+    |       |   └─ PlaceOrderRequestDto.cs
+    |       └─ Responses/
+    |           └─ PlaceOrderResponseDto.cs
+    |
+    ├─ EventHandlers/
+    |   # Inbound events are handled here and translated to Manager calls
+    |   ├─ OrderEventHandler.cs
+    |   └─ PaymentEventHandler.cs
+    |
+    ├─ Mapping/
+    |   ├─ ApiMapping.cs                # API DTO ↔ Domain
+    |   └─ InboundEventMapping.cs       # inbound wire/event DTO ↔ Manager input
+    |
+    ├─ ExceptionHandling/
+    |   └─ ApiExceptionMapper.cs
+    |
+    └─ DependencyInjection.cs           # composition root (DI registrations)
 ----
+
+---
+
+=== Layer Dependencies
+
+Legend:
+* "A -> B" means "A references / depends on B"
+* Allowed calls are aligned with closed architecture principles
+
+----
+Client
+  -> MySystem.Service
+
+MySystem.Service
+  -> MySystem.Managers
+  -> MySystem.Engines
+  -> MySystem.ResourceAccess
+  -> MySystem.Utilities
+
+MySystem.Managers
+  -> MySystem.Engines
+  -> MySystem.Utilities
+  -> (calls via interfaces in Engines.Contracts)
+     - IOrderAccessor / IInventoryAccessor / IPaymentGateway
+     - IEventPublisher
+
+MySystem.Engines
+  -> MySystem.Utilities
+  -> (defines interfaces in Engines.Contracts, does NOT depend on ResourceAccess)
+
+MySystem.ResourceAccess
+  -> MySystem.Engines          (to implement Engines.Contracts + use Domain models)
+  -> MySystem.Utilities
+  -> external SDKs (SQL/HTTP/EventBus)
+
+MySystem.Utilities
+  -> (no project dependencies)
+----
+
+Notes:
+
+* Managers may publish events via `IEventPublisher` (defined in Engines.Contracts, implemented in ResourceAccess.Messaging).
+* Engines do not publish events.
+* ResourceAccess may *receive* events via bus consumer, but inbound event handling and dispatch to Managers is hosted in Service (EventHandlers).
 
 ---
 
