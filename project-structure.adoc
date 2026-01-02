@@ -1,4 +1,4 @@
-= IDesign Project Structure Summary (Extended: Exceptions, Models, DTOs, and Modular Monolith Option)
+= IDesign Project Structure Summary
 :toc:
 :toclevels: 3
 :sectnums:
