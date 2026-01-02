@@ -1,0 +1,262 @@
+= Using Activity Diagrams to Explain Use Cases (IDesign)
+:toc:
+:toclevels: 3
+:sectnums:
+
+This document explains **how activity diagrams describe use cases**
+and **how they map directly to IDesign roles**:
+*Manager*, *Engine*, and *ResourceAccess*.
+
+It includes:
+* A **textual activity diagram**
+* The same diagram in **PlantUML**
+* A **Manager implementation example**
+* No Engine implementations (intentionally)
+
+---
+
+== Why Activity Diagrams Are Used
+
+In IDesign, requirements are captured as **required behavior**.
+Activity diagrams are used when a use case has:
+
+* Nested conditions
+* Branching decisions
+* Optional steps
+* External system interaction
+* Loops or retries
+
+An activity diagram is a **behavioral contract**.
+It answers *what happens* and *in what order*, not *how it is coded*.
+
+---
+
+== Mapping Rules: Diagram → Code
+
+[cols="1,3",options="header"]
+|===
+| Diagram Element | Implementation Mapping
+
+| Start of flow
+| Public Manager method (use-case entry)
+
+| Action (business meaning)
+| Engine method call
+
+| Decision (diamond)
+| Engine decision + Manager branching
+
+| External interaction
+| ResourceAccess method
+
+| Branching / sequencing
+| Manager orchestration logic
+
+| Optional step
+| Manager-controlled conditional
+
+| End of flow
+| Manager returns result
+|===
+
+**Core rule:**  
+The *Manager executes the diagram*.
+
+---
+
+== Mini Example Use Case
+
+*As a user browsing a catalog page, I want to see product availability so that I can make informed purchasing decisions.*
+
+---
+
+== Activity Diagram — TEXT VERSION
+
+This is the **canonical text form** of the use case.
+You should be able to implement the Manager directly from this.
+
+----
+START
+|
+|--> Validate request
+|       |
+|       +--> [Invalid] --> Return validation error --> END
+|
+|--> Fetch availability from Warehouse
+|
+|--> Classify availability
+|       |
+|       +--> [Any unknown]
+|       |       --> Mark as Availability Unknown
+|       |
+|       +--> [All known]
+|               --> Mark as In Stock / Out of Stock
+|
+|--> [Optional] Save availability snapshot
+|
+|--> Return availability response
+|
+END
+----
+
+Notes:
+* Decisions (`[ ... ]`) are business decisions
+* External calls are explicit (Warehouse, DB)
+* Optional steps are marked explicitly
+
+---
+
+== Activity Diagram — PlantUML VERSION
+
+[source,plantuml]
+----
+@startuml
+title Mini Example: Activity Diagram → IDesign Mapping
+
+skinparam shadowing false
+skinparam activity {
+  BackgroundColor white
+  BorderColor black
+}
+
+partition "Client" {
+  start
+  :Request availability for\nvisible page products;
+}
+
+partition "System (Manager + Engines)" {
+  :AvailabilityManager.CheckAvailability(productIds);
+  :AvailabilityValidationEngine.Validate(request);
+
+  if ("Request valid?") then ([yes])
+    :Prepare list of productIds;
+  else ([no])
+    :Return validation error;
+    stop
+  endif
+}
+
+partition "Warehouse (External)" {
+  :WarehouseResourceAccess.GetAvailability(productIds);
+}
+
+partition "System (Manager + Engines)" {
+  if ("Any item unknown?") then ([yes])
+    :Classify as Availability Unknown;
+  else ([no])
+    :Classify as In Stock / Out of Stock;
+  endif
+}
+
+partition "DB (Resource)" {
+  :AvailabilityResourceAccess.SaveSnapshot(results) [optional];
+}
+
+partition "System (Manager)" {
+  :Return availability response;
+  stop
+}
+@enduml
+----
+
+---
+
+== Manager Implementation Example (C#)
+
+This implementation is a **direct transcription** of the activity diagram.
+
+IMPORTANT:
+* Engines are *used*, not implemented here
+* ResourceAccess performs integration only
+* The Manager owns sequencing and branching
+
+[source,csharp]
+----
+public sealed class AvailabilityManager
+{
+    private readonly IAvailabilityValidationEngine _validationEngine;
+    private readonly IAvailabilityClassificationEngine _classificationEngine;
+    private readonly IWarehouseAvailabilityAccessor _warehouseAccessor;
+    private readonly IAvailabilitySnapshotAccessor _snapshotAccessor;
+
+    public AvailabilityManager(
+        IAvailabilityValidationEngine validationEngine,
+        IAvailabilityClassificationEngine classificationEngine,
+        IWarehouseAvailabilityAccessor warehouseAccessor,
+        IAvailabilitySnapshotAccessor snapshotAccessor)
+    {
+        _validationEngine = validationEngine;
+        _classificationEngine = classificationEngine;
+        _warehouseAccessor = warehouseAccessor;
+        _snapshotAccessor = snapshotAccessor;
+    }
+
+    public async Task<IReadOnlyList<AvailabilityResult>> CheckAvailabilityAsync(
+        IReadOnlyList<ProductId> productIds,
+        CancellationToken cancellationToken)
+    {
+        // Diagram: Validate request
+        _validationEngine.Validate(productIds);
+
+        // Diagram: Fetch availability from Warehouse
+        IReadOnlyDictionary<ProductId, RawAvailability> rawAvailability =
+            await _warehouseAccessor.GetAvailabilityAsync(productIds, cancellationToken);
+
+        // Diagram: Classify availability (decision handled by Engine)
+        IReadOnlyList<AvailabilityResult> results =
+            _classificationEngine.Classify(rawAvailability);
+
+        // Diagram: [Optional] Save snapshot
+        if (ShouldPersistSnapshot(results))
+        {
+            await _snapshotAccessor.SaveSnapshotAsync(results, cancellationToken);
+        }
+
+        // Diagram: Return response
+        return results;
+    }
+
+    private static bool ShouldPersistSnapshot(
+        IReadOnlyList<AvailabilityResult> results)
+    {
+        // Use-case policy belongs to the Manager
+        return results.Count > 0;
+    }
+}
+----
+
+---
+
+== Traceability Check (Very Important)
+
+You should be able to:
+
+* Point to **every line** in the Manager
+* Trace it to **exactly one step** in the text or PlantUML diagram
+
+If you cannot:
+* Either logic is missing from the diagram
+* Or logic is in the wrong layer
+
+---
+
+== Mental Model (Memorable)
+
+* Text diagram = **use-case script**
+* PlantUML = **visual contract**
+* Manager = **executor of the script**
+* Engine = **answers business questions**
+* ResourceAccess = **talks to the outside world**
+
+---
+
+== Final Rule of Thumb
+
+> **If you can delete the Manager and rewrite it purely from the activity diagram without losing behavior, your design is correct.  
+If you must read Engine or ResourceAccess code to understand the flow, the design is wrong.**
+
+If you want, next we can:
+* Add a **parallel fork/join example**
+* Add a **retry loop example**
+* Map *your* real activity diagram to a Manager
+* Generate a **template for documenting use cases with text + PlantUML**
