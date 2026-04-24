@@ -1,0 +1,148 @@
+= Resource Access / Accessor Summary
+:toc:
+
+== Core Definitions
+
+=== Resource Access (Accessor Layer)
+
+The *Accessor Layer* in Righting Software corresponds to the *ResourceAccess layer*.
+
+Its responsibility is to communicate with external resources while isolating the rest of the system from technology details.
+
+It typically sits below Managers and Engines.
+
+Interaction rule:
+
+* Managers and Engines may call ResourceAccess.
+* ResourceAccess components communicate with Resources.
+* ResourceAccess components should not contain business logic.
+
+---
+
+=== Accessor
+
+An *Accessor* is an individual component/class inside the ResourceAccess layer.
+
+Examples:
+
+* CustomerAccessor
+* OrderAccessor
+* InventoryAccessor
+* PaymentGatewayAccessor
+
+Its purpose is to perform external communication on behalf of the system.
+
+---
+
+=== Resource
+
+A *Resource* is the external thing being accessed.
+
+Examples:
+
+* Database
+* File system
+* REST API
+* Cloud storage
+* Message queue
+* Legacy system
+
+---
+
+== Relationship
+
+[source,text]
+----
+Manager -> Accessor -> Resource
+----
+
+Example:
+
+[source,text]
+----
+OrderManager -> OrderAccessor -> PostgreSQL
+----
+
+---
+
+== Important Design Principle
+
+The Accessor should *not* mimic the exact methods of the external system.
+
+Bad design:
+
+[source,java]
+----
+insert()
+update()
+delete()
+select()
+----
+
+This ties your system to database/API implementation details.
+
+Good design:
+
+[source,java]
+----
+storeNewOrder()
+getPendingOrdersForShipping()
+markOrderAsPaid()
+cancelUnfulfilledOrder()
+----
+
+These methods reflect *system needs* and *business intent*, not raw technology commands.
+
+---
+
+== Bigger Responsibility Methods
+
+A single accessor method may internally perform:
+
+* Multiple SQL operations
+* API calls
+* Transactions
+* Mapping objects
+* Retries
+* Logging
+* Error handling
+
+So Accessor methods may have broader responsibility than one raw database/API call.
+
+---
+
+== Why This Matters
+
+If technology changes:
+
+* PostgreSQL -> MongoDB
+* REST API -> Event stream
+* Local files -> Amazon S3
+
+Then only the Accessor layer should change as much as possible.
+
+Managers and business logic remain stable.
+
+---
+
+== Righting Software Alignment
+
+Design against requirements, not implementation details.
+
+ResourceAccess exists to isolate volatility and protect upper layers from change.
+
+---
+
+== Memory Trick
+
+* Layer = group of components
+* Accessor = one component in the layer
+* Resource = external system being accessed
+
+---
+
+== One-Line Summary
+
+An Accessor is not a thin wrapper around external methods.
+
+It is a resource-facing capability component designed around what the system needs done.
