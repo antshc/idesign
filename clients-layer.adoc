@@ -46,6 +46,28 @@ Examples:
 * Transfer Money
 * Generate Report
 * Create Account
+* Controllers and Background Services
+
+=== Controllers and Background Services
+In Righting Software architecture, both *ASP.NET Controllers* and *Background Services* can be considered *Clients* because they are *delivery mechanisms* that initiate system use cases by calling the Manager layer.
+
+* A *Controller* is a delivery mechanism triggered by external HTTP requests from browsers, mobile apps, or other systems.
+* A *Background Service* is a delivery mechanism triggered by timers, queues, scheduled jobs, or external events.
+
+Their responsibility is to remain thin and only:
+
+* receive the trigger
+* prepare the request
+* call one Manager
+* return or log the result
+
+They should not contain business rules, orchestration logic, or direct data access.
+
+[source,text]
+----
+HTTP Request -> Controller -> Manager
+Timer/Queue   -> BackgroundService -> Manager
+----
 
 == 3. Rules for Clients
 
@@ -53,8 +75,6 @@ From the sources:
 
 * Clients do not call multiple Managers in the same use case
 * Clients do not publish events
-
-cite:[turn0file5]
 
 This means the client should remain simple and should not coordinate internal workflows.
 
