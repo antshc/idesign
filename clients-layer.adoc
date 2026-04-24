@@ -1,0 +1,122 @@
+= Clients Layer and Clients in Righting Software Architecture
+
+== 1. Clients Layer
+
+Using the attached Righting Software / IDesign sources, the *Clients layer* is the *topmost layer* of the system architecture.
+
+Typical layered structure:
+
+1. Clients
+2. Managers
+3. Engines
+4. ResourceAccess
+5. Resources
+
+The architecture prefers a *closed layered model* where calls flow downward only.
+
+From the sources:
+
+* Do not call up
+* Do not call sideways
+* Do not call more than one layer down
+
+cite:[turn0file5]
+
+This means Clients should normally call only the *Manager layer*.
+
+== 2. What Is a Client?
+
+A *Client* is anything outside the system that initiates a use case.
+
+Examples of clients:
+
+* Web application
+* Mobile application
+* Desktop application
+* External API consumer
+* Scheduled batch process
+* Admin portal
+* Partner integration system
+
+A client requests business behavior from the system.
+
+Examples:
+
+* Place Order
+* Transfer Money
+* Generate Report
+* Create Account
+
+== 3. Rules for Clients
+
+From the sources:
+
+* Clients do not call multiple Managers in the same use case
+* Clients do not publish events
+
+cite:[turn0file5]
+
+This means the client should remain simple and should not coordinate internal workflows.
+
+== 4. Responsibilities of Clients
+
+Clients should be *thin*.
+
+They handle:
+
+* User input
+* Display and presentation
+* Sending requests
+* Passing authentication context
+* Calling one Manager
+
+Clients should *not* handle:
+
+* Business rules
+* Workflow orchestration
+* Direct database access
+* Coordination across Managers
+
+== 5. Example
+
+=== E-Commerce System
+
+Clients:
+
+* Web Storefront
+* Mobile App
+* Customer Support Portal
+
+Manager:
+
+* OrderManager
+
+Flow:
+
+[source,text]
+----
+Web Client -> OrderManager
+----
+
+OrderManager then coordinates Engines and ResourceAccess internally.
+
+== 6. Why This Matters
+
+Thin clients provide:
+
+* Reusable backend services
+* Support for multiple frontends
+* Better separation of concerns
+* Easier maintenance
+* Easier testing
+* Stable business core
+
+== 7. One-Line Definition
+
+A *Client* is an external actor or application that starts a use case by calling the system's *Manager layer* while remaining free of business logic.
+
+== 8. Mental Model
+
+Clients ask.
+
+Managers decide.
