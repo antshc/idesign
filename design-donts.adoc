@@ -1,0 +1,37 @@
+= Design “Don’ts”
+
+If you do one of the things on this list, you will likely live to regret it. Treat any violation of these rules as a red flag and investigate further to see what you are missing.
+
+== Clients
+
+*Clients do not call multiple Managers in the same use case.* Doing so implies that the Managers are tightly coupled and no longer represent separate families of use cases, or separate subsystems, or separate slices. Chained Manager calls from the Client indicate functional decomposition, requiring the Client to stitch the underlying functionalities together (see Figure 2-1). Clients can call multiple Managers but not in the same use case; for example, a Client can call Manager A to perform use case 1 and then call Manager B to perform use case 2.
+
+*Clients do not call Engines.* The only entry points to the business layer are the Managers. The Managers represent the system, and the Engines are really an internal layer implementation detail. If the Clients call the Engines, use case sequencing and associated volatility are forced to migrate to the Clients, polluting them with business logic. Calls from Clients to Engines are the hallmark of a functional decomposition.
+
+*Clients do not publish events.* Events represent changes to the state of the system about which Clients (or Managers) may want to know. A Client has no need to notify itself (or other Clients). In addition, knowledge of the internals of the system is often required to detect the need to publish an event--knowledge that the Clients should not have. However, with a functional decomposition, the Client is the system and needs to publish the event.
+
+== Managers
+
+*Managers do not queue calls to more than one Manager in the same use case.* If there are two Managers receiving a queued call, why not a third? Why not all of them? The need to have two (or more) Managers respond to a queued call is a strong indication that more Managers (and maybe all of them) would need to respond, so you should use a Pub/Sub Utility service instead.
+
+== Engines
+
+*Engines do not receive queued calls.* Engines are utilitarian and exist to execute a volatile activity for a Manager. They have no independent meaning on their own. A queued call, by definition, executes independently from anything else in the system. Performing just the activity of an Engine, disconnected from any use case or other activities, does not make any business sense.
+
+*Engines do not publish events.* Publishing an event requires noticing and responding to a change in the system and is typically a step in a use case executed by the Manager. An Engine performing an activity has no way of knowing much about the context of the activity or the state of the use case.
+
+*Engines, ResourceAccess, and Resources do not subscribe to events.* Processing an event is almost always the start of some use case, so it must be done in a Client or a Manager. The Client may inform a user about the event, and the Manager may execute some back-end behavior.
+
+*Engines never call each other.* Not only do such calls violate the closed architecture principle, but they also do not make sense in a volatility based decomposition. The Engine should have already encapsulated everything to do with that activity. Any Engine-to-Engine calls indicate functional decomposition.
+
+== ResourceAccess Services
+
+*ResourceAccess services do not receive queued calls.* Very similar to the Engines guideline, ResourceAccess services exist to service a Manager or an Engine and have no meaning on their own. Accessing a Resource independently from anything else in the system does not make any business sense.
+
+*ResourceAccess services do not publish events.* ResourceAccess services have no way of knowing the significance of the state of the Resource to the system. Any such knowledge or responding behavior should reside in Managers.
+
+*ResourceAccess services never call each other.* If ResourceAccess services encapsulate the volatility of an atomic business verb, one atomic verb cannot require another. This is similar to the rule that Engines should not call each other. Note that a 1:1 mapping between ResourceAccess and Resources (every Resource has its own ResourceAccess) is not required. Often two or more Resources logically must be joined together to implement some atomic business verbs. A single ResourceAccess service should perform the join rather than inter-ResourceAccess services calls.
+
+== Resources
+
+*Resources do not publish events.* The need for the Resource to publish events is often the result of a tightly coupled functional decomposition. Similar to the case for ResourceAccess, business logic of this kind should reside in Managers. As a Manager modifies the state of the system, the Manager should also publish the appropriate events.
